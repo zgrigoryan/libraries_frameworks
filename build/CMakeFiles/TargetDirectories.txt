@@ -1,0 +1,4 @@
+/Users/zagrigoryan/Desktop/libraries_frameworks/build/CMakeFiles/overload.dir
+/Users/zagrigoryan/Desktop/libraries_frameworks/build/CMakeFiles/http_demo.dir
+/Users/zagrigoryan/Desktop/libraries_frameworks/build/CMakeFiles/edit_cache.dir
+/Users/zagrigoryan/Desktop/libraries_frameworks/build/CMakeFiles/rebuild_cache.dir

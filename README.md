@@ -107,3 +107,86 @@ _ZN3Foo1hEv
 
 ## Designing an API wrapper
 
+This section adds a tiny, safe C++ layer on top of the C libcurl API.
+
+### Files
+
+* `http_client.hpp` — RAII wrapper (`CurlGlobal`, `HttpRequest`, `HttpResponse`)
+* `main_http.cpp` — demo using the wrapper
+
+### Build & run
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+./build/http_demo
+```
+
+### What you should see
+
+Example run (truncated):
+
+```
+GET status: 200
+Body size: 264 bytes
+POST status: 200
+{
+  "args": {},
+  "data": "{\"x\":1}",
+  "headers": {
+    "Content-Type": "application/json",
+    "User-Agent": "net::HttpRequest/1.0",
+    ...
+  },
+  "json": { "x": 1 },
+  "url": "https://httpbin.org/post"
+}
+```
+
+### Wrapper API (high level)
+
+```cpp
+net::CurlGlobal curl_once;  // global init/cleanup (RAII)
+
+auto get = net::HttpRequest{}
+            .set_url("https://httpbin.org/get")
+            .set_timeout_ms(5000)
+            .get();                 // HttpResponse { status, body, headers }
+
+auto post = net::HttpRequest{}
+             .set_url("https://httpbin.org/post")
+             .set_body(R"({"x":1})", "application/json")
+             .post();
+```
+
+### Why this follows RAII/best practices
+
+* **Ownership & cleanup**: `CURL*` and `curl_slist*` are held by `std::unique_ptr` with custom deleters → no leaks, no manual `cleanup()` calls.
+* **Global lifetime**: `CurlGlobal` pairs `curl_global_init/cleanup` automatically and exactly once.
+* **Exception safety**: failures throw `std::runtime_error` with a populated libcurl error buffer; destructors still run.
+* **Move-only**: copying a handle is disabled; moving is allowed to transfer ownership.
+* **Reasonable defaults**: follow redirects, user agent set, body/header callbacks installed internally.
+* **Fluent configuration**: `set_url()`, `set_timeout_ms()`, `add_header()`, `set_body()` → reads like intent, not plumbing.
+
+### Before vs After (API design)
+
+**Raw C (before)**
+
+* Multiple `curl_easy_setopt` calls per request.
+* You must wire callbacks and manage `curl_slist` yourself.
+* Manual cleanup on every return path (`curl_slist_free_all`, `curl_easy_cleanup`).
+* Error handling via `CURLcode` + global error buffer.
+
+**RAII wrapper (after)**
+
+* One object per request (`HttpRequest`) + one global guard (`CurlGlobal`).
+* Clear, discoverable methods (IDE completion) instead of stringly-typed options.
+* Automatic cleanup on scope exit, even on exceptions.
+* Results returned as a typed `HttpResponse` (`status`, `body`, `headers`).
+
+### Design notes / extensibility
+
+* **Threading**: Create `CurlGlobal` before spawning threads. Use each `HttpRequest` from a single thread at a time.
+* **Error model**: Currently exceptions; could be swapped for `std::expected` if you prefer non-throwing flows.
+* **Easy to extend**: add helpers like `bearer_token()`, `accept_json()`, `add_query_param()`, TLS/Proxy options, retries/backoff, streaming to a file, etc.

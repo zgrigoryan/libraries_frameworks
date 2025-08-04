@@ -9,26 +9,21 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         build_type: [Release]
         include:
-          # Ubuntu - GCC
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
-          # Ubuntu - Clang
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
-          # Windows - MSVC
           - os: windows-latest
             c_compiler: cl
             cpp_compiler: cl
-          # macOS - Apple Clang (use clang/clang++)
           - os: macos-latest
             c_compiler: clang
             cpp_compiler: clang++
@@ -36,13 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set reusable strings
-        id: strings
+      - name: Compute build dir
+        id: cfg
         shell: bash
         run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+          BUILD_DIR="${RUNNER_TEMP}/build-${{ matrix.os }}-${{ matrix.c_compiler }}-${{ matrix.build_type }}"
+          echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
 
-      # ----- Dependencies per OS -----
+      # ---------------- Dependencies ----------------
 
       - name: Install curl dev (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -56,7 +52,7 @@ jobs:
           brew update
           brew install curl
 
-      - name: Setup MSVC dev command prompt (Windows)
+      - name: Setup MSVC env (Windows)
         if: matrix.os == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -70,76 +66,58 @@ jobs:
           & $env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat
           & $env:VCPKG_INSTALLATION_ROOT\vcpkg.exe install curl:x64-windows
 
-      # ----- Configure CMake -----
+      # ---------------- Configure ----------------
 
-      - name: Configure CMake (Unix)
+      - name: Clean build dir
+        run: cmake -E rm -rf "${{ steps.cfg.outputs.build_dir }}"
+
+      - name: Configure (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: >
-          cmake
-          -B "${{ steps.strings.outputs.build-output-dir }}"
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          ${{ (matrix.os == 'macos-latest') && format('-DCMAKE_PREFIX_PATH={0}', steps.brewpath.outputs.path) || '' }}
-          -S "${{ github.workspace }}"
-        env:
-          # On macOS, prefer Homebrew curl if needed. (CMAKE_PREFIX_PATH is empty on Ubuntu.)
-          # You can remove this if your CMake already finds system curl.
-          # We compute brew path in the step below.
-          BREW_CURL_PREFIX: ""
+        run: |
+          CMAKE_ARGS=(
+            -B "${{ steps.cfg.outputs.build_dir }}"
+            -S "${{ github.workspace }}"
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          )
+          # On macOS, point to Homebrew curl to avoid SDK curl if needed.
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="$(brew --prefix curl)")
+          fi
+          cmake "${CMAKE_ARGS[@]}"
 
-      - name: Grab Homebrew curl prefix (macOS)
-        if: matrix.os == 'macos-latest'
-        id: brewpath
-        shell: bash
-        run: echo "path=$(brew --prefix curl)" >> "$GITHUB_OUTPUT"
-
-      - name: Re-configure CMake (macOS with brew prefix)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: >
-          cmake
-          -B "${{ steps.strings.outputs.build-output-dir }}"
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DCMAKE_PREFIX_PATH="${{ steps.brewpath.outputs.path }}"
-          -S "${{ github.workspace }}"
-
-      - name: Configure CMake (Windows + vcpkg)
+      - name: Configure (Windows with vcpkg)
         if: runner.os == 'Windows'
         shell: pwsh
         run: >
           cmake
-          -B "${{ steps.strings.outputs.build-output-dir }}"
+          -B "${{ steps.cfg.outputs.build_dir }}"
+          -S "${{ github.workspace }}"
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake"
-          -S "${{ github.workspace }}"
 
-      # ----- Build -----
+      # ---------------- Build ----------------
 
       - name: Build
-        run: cmake --build "${{ steps.strings.outputs.build-output-dir }}" --config ${{ matrix.build_type }}
+        run: cmake --build "${{ steps.cfg.outputs.build_dir }}" --config ${{ matrix.build_type }}
 
-      # ----- Run binaries -----
+      # ---------------- Run ----------------
 
       - name: Run (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          set -eux
-          if [ -x "${{ steps.strings.outputs.build-output-dir }}/overload" ]; then
-            "${{ steps.strings.outputs.build-output-dir }}/overload"
-          fi
-          if [ -x "${{ steps.strings.outputs.build-output-dir }}/http_demo" ]; then
-            "${{ steps.strings.outputs.build-output-dir }}/http_demo"
-          fi
+          set -e
+          BD="${{ steps.cfg.outputs.build_dir }}"
+          [ -x "$BD/overload" ] && "$BD/overload"
+          [ -x "$BD/http_demo" ] && "$BD/http_demo"
 
       - name: Run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dir = "${{ steps.strings.outputs.build-output-dir }}\${{ matrix.build_type }}"
-          if (Test-Path "$dir\overload.exe") { & "$dir\overload.exe" }
-          if (Test-Path "$dir\http_demo.exe") { & "$dir\http_demo.exe" }
+          $bd = "${{ steps.cfg.outputs.build_dir }}\${{ matrix.build_type }}"
+          if (Test-Path "$bd\overload.exe") { & "$bd\overload.exe" }
+          if (Test-Path "$bd\http_demo.exe") { & "$bd\http_demo.exe" }

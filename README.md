@@ -101,6 +101,4 @@ _ZN3Foo1hEv
 
 ### Comparison - Mangled Names
 
-```
 ![Mangled names: GCC/Clang (Itanium) vs MSVC (Microsoft ABI)](./static_h.png)
-```

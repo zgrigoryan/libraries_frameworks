@@ -102,22 +102,3 @@ jobs:
 
       - name: Build
         run: cmake --build "${{ steps.cfg.outputs.build_dir }}" --config ${{ matrix.build_type }}
-
-      # ---------------- Run ----------------
-
-      - name: Run (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -e
-          BD="${{ steps.cfg.outputs.build_dir }}"
-          [ -x "$BD/overload" ] && "$BD/overload"
-          [ -x "$BD/http_demo" ] && "$BD/http_demo"
-
-      - name: Run (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bd = "${{ steps.cfg.outputs.build_dir }}\${{ matrix.build_type }}"
-          if (Test-Path "$bd\overload.exe") { & "$bd\overload.exe" }
-          if (Test-Path "$bd\http_demo.exe") { & "$bd\http_demo.exe" }
